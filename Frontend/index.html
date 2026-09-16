@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Calculadora de Horas Extras - CLT</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+    .container { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 850px; }
+    h2, h3 { color: #2c3e50; margin-bottom: 15px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    label { font-size: 14px; font-weight: bold; color: #555; }
+    input, select, textarea, button { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+    button { background-color: #27ae60; color: white; border: none; font-weight: bold; cursor: pointer; font-size: 15px; }
+    button:hover { background-color: #219150; }
+    button.btn-danger { background-color: #e74c3c; }
+    button.btn-export { background-color: #2980b9; width: auto; padding: 8px 15px; margin-bottom: 0; }
+    button.btn-edit { background-color: #f39c12; margin-right: 5px; width: auto; padding: 5px 10px; }
+    button.btn-delete { background-color: #e74c3c; width: auto; padding: 5px 10px; }
+    .card-resumo { background: #34495e; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .card-resumo p { margin: 5px 0; font-size: 15px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: #f8f9fa; padding: 10px; border-radius: 6px; }
+    .toolbar div { display: flex; align-items: center; gap: 10px; }
+    .toolbar input { margin: 0; width: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 13px; }
+    th { background-color: #f8f9fa; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <!-- Tela 1: Cadastro -->
+    <div id="secao-cadastro">
+      <h2>Dados do Colaborador</h2>
+      <form id="formCadastro">
+        <label>Nome Completo:</label>
+        <input type="text" id="nome" required placeholder="Ex: João da Silva">
+        <label>Cargo:</label>
+        <input type="text" id="cargo" required placeholder="Ex: Desenvolvedor">
+        <label>Salário Atual (R$):</label>
+        <input type="number" id="salario" step="0.01" required placeholder="Ex: 3000.00">
+        <button type="submit">Cadastrar e Iniciar</button>
+      </form>
+    </div>
+
+    <!-- Tela 2: Painel Principal -->
+    <div id="secao-principal" class="hidden">
+      <div class="card-resumo">
+        <h3 style="color: #ecf0f1; margin-top:0;">Perfil e Extrato CLT</h3>
+        <p><strong>Colaborador:</strong> <span id="resNome">-</span> (<span id="resCargo">-</span>)</p>
+        <p><strong>Salário:</strong> R$ <span id="resSalario">0.00</span> | <strong>Valor Hora Base:</strong> R$ <span id="resHoraBase">0.00</span></p>
+        <hr style="border-color: #5d6d7e;" />
+        <p><strong>Total Horas Extras:</strong> <span id="resTotalHoras">0.0</span>h</p>
+        <p><strong>Subtotal Horas Extras:</strong> R$ <span id="resTotalHE">0.00</span></p>
+        <p><strong>Estimativa DSR (CLT):</strong> R$ <span id="resDSR">0.00</span></p>
+        <p style="font-size: 18px; color: #2ecc71;"><strong>Total Geral a Receber:</strong> R$ <span id="resTotalGeral">0.00</span></p>
+      </div>
+
+      <div class="toolbar">
+        <div>
+          <label for="filtroMes"><strong>Filtrar Período:</strong></label>
+          <input type="month" id="filtroMes" onchange="carregarLancamentos()">
+        </div>
+        <button class="btn-export" onclick="exportarCSV()">Exportar CSV</button>
+      </div>
+
+      <h3 id="tituloForm">Lançar Hora Extra</h3>
+      <form id="formLancamento">
+        <input type="hidden" id="lancamentoId">
+        <div class="grid">
+          <div>
+            <label>Data:</label>
+            <input type="date" id="data" required>
+          </div>
+          <div>
+            <label>Adicional (%):</label>
+            <select id="porcentagem" required>
+              <option value="50">50% (Dias úteis / Sábados)</option>
+              <option value="100">100% (Domingos e Feriados)</option>
+            </select>
+          </div>
+          <div>
+            <label>Início:</label>
+            <input type="time" id="horaInicio" required>
+          </div>
+          <div>
+            <label>Fim:</label>
+            <input type="time" id="horaFim" required>
+          </div>
+        </div>
+        <label>Justificativa:</label>
+        <textarea id="justificativa" rows="2" required placeholder="Motivo"></textarea>
+        <button type="submit" id="btnSalvar">Salvar Lançamento</button>
+        <button type="button" id="btnCancelar" class="btn-danger hidden" onclick="limparFormulario()">Cancelar</button>
+      </form>
+
+      <h3>Lançamentos Registrados</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Horário</th>
+            <th>Total (h)</th>
+            <th>Tipo</th>
+            <th>Valor Final</th>
+            <th>Justificativa</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="tabelaCorpo"></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <script>
+    // URL configurada para testes locais no backend Node.js
+    const API_URL = 'http://localhost:3000/api';
+    let dadosAtuais = null;
+
+    async function verificarUsuario() {
+      try {
+        const res = await fetch(`${API_URL}/usuario`);
+        const usuario = await res.json();
+        if (usuario && usuario.nome) {
+          exibirPainel();
+        } else {
+          exibirCadastro();
+        }
+      } catch (err) {
+        exibirCadastro();
+      }
+    }
+
+    function exibirCadastro() {
+      document.getElementById('secao-cadastro').classList.remove('hidden');
+      document.getElementById('secao-principal').classList.add('hidden');
+    }
+
+    function exibirPainel() {
+      document.getElementById('secao-cadastro').classList.add('hidden');
+      document.getElementById('secao-principal').classList.remove('hidden');
+      carregarLancamentos();
+    }
+
+    document.getElementById('formCadastro').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const dados = {
+        nome: document.getElementById('nome').value,
+        cargo: document.getElementById('cargo').value,
+        salario: document.getElementById('salario').value
+      };
+      const res = await fetch(`${API_URL}/usuario`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados)
+      });
+      if (res.ok) exibirPainel();
+    });
+
+    async function carregarLancamentos() {
+      const mesAno = document.getElementById('filtroMes').value;
+      const url = mesAno ? `${API_URL}/lancamentos?mesAno=${mesAno}` : `${API_URL}/lancamentos`;
+
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return;
+        dadosAtuais = await res.json();
+
+        if (dadosAtuais.usuario) {
+          document.getElementById('resNome').innerText = dadosAtuais.usuario.nome;
+          document.getElementById('resCargo').innerText = dadosAtuais.usuario.cargo;
+          document.getElementById('resSalario').innerText = Number(dadosAtuais.usuario.salario).toFixed(2);
+          document.getElementById('resHoraBase').innerText = Number(dadosAtuais.resumo.valorHoraNormal).toFixed(2);
+          document.getElementById('resTotalHoras').innerText = Number(dadosAtuais.resumo.totalHoras || 0).toFixed(1);
+          document.getElementById('resTotalHE').innerText = Number(dadosAtuais.resumo.totalReceberHE || 0).toFixed(2);
+          document.getElementById('resDSR').innerText = Number(dadosAtuais.resumo.valorDSR || 0).toFixed(2);
+          document.getElementById('resTotalGeral').innerText = Number(dadosAtuais.resumo.totalGeral || 0).toFixed(2);
+        }
+
+        const tbody = document.getElementById('tabelaCorpo');
+        tbody.innerHTML = '';
+
+        if (dadosAtuais.lancamentos && dadosAtuais.lancamentos.length > 0) {
+          dadosAtuais.lancamentos.forEach(item => {
+            const itemJson = JSON.stringify(item).replace(/'/g, "&apos;");
+            tbody.innerHTML += `
+              <tr>
+                <td>${item.data}</td>
+                <td>${item.horaInicio} - ${item.horaFim}</td>
+                <td>${Number(item.totalHoras).toFixed(1)}h</td>
+                <td>${item.porcentagem}%</td>
+                <td>R$ ${Number(item.valorTotalItem).toFixed(2)}</td>
+                <td>${item.justificativa}</td>
+                <td>
+                  <button class="btn-edit" onclick='prepararEdicao(${itemJson})'>Editar</button>
+                  <button class="btn-delete" onclick="excluirLancamento(${item.id})">Excluir</button>
+                </td>
+              </tr>
+            `;
+          });
+        } else {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Nenhum lançamento encontrado.</td></tr>';
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    document.getElementById('formLancamento').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('lancamentoId').value;
+      const payload = {
+        data: document.getElementById('data').value,
+        horaInicio: document.getElementById('horaInicio').value,
+        horaFim: document.getElementById('horaFim').value,
+        porcentagem: document.getElementById('porcentagem').value,
+        justificativa: document.getElementById('justificativa').value
+      };
+
+      const url = id ? `${API_URL}/lancamentos/${id}` : `${API_URL}/lancamentos`;
+      const method = id ? 'PUT' : 'POST';
+
+      await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      limparFormulario();
+      carregarLancamentos();
+    });
+
+    function prepararEdicao(item) {
+      document.getElementById('lancamentoId').value = item.id;
+      document.getElementById('data').value = item.data;
+      document.getElementById('horaInicio').value = item.horaInicio;
+      document.getElementById('horaFim').value = item.horaFim;
+      document.getElementById('porcentagem').value = item.porcentagem;
+      document.getElementById('justificativa').value = item.justificativa;
+      document.getElementById('tituloForm').innerText = 'Editar Lançamento';
+      document.getElementById('btnSalvar').innerText = 'Atualizar';
+      document.getElementById('btnCancelar').classList.remove('hidden');
+    }
+
+    function limparFormulario() {
+      document.getElementById('lancamentoId').value = '';
+      document.getElementById('formLancamento').reset();
+      document.getElementById('tituloForm').innerText = 'Lançar Hora Extra';
+      document.getElementById('btnSalvar').innerText = 'Salvar Lançamento';
+      document.getElementById('btnCancelar').classList.add('hidden');
+    }
+
+    async function excluirLancamento(id) {
+      if (confirm('Deseja excluir este registro?')) {
+        await fetch(`${API_URL}/lancamentos/${id}`, { method: 'DELETE' });
+        carregarLancamentos();
+      }
+    }
+
+    function exportarCSV() {
+      if (!dadosAtuais || !dadosAtuais.lancamentos.length) {
+        alert('Não há dados para exportar.');
+        return;
+      }
+
+      let csv = 'Data;Horario Inicio;Horario Fim;Adicional %;Total Horas;Valor Final (R$);Justificativa\n';
+      dadosAtuais.lancamentos.forEach(l => {
+        csv += `${l.data};${l.horaInicio};${l.horaFim};${l.porcentagem}%;${l.totalHoras.toFixed(2)};${l.valorTotalItem.toFixed(2)};"${l.justificativa}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `extrato_horas_extras_${document.getElementById('filtroMes').value || 'geral'}.csv`;
+      link.click();
+    }
+
+    verificarUsuario();
+  </script>
+</body>
+</html>
