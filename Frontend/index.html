@@ -3,30 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <title>Controle de Horas Extras - CLT</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-    .container { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 850px; }
-    h2, h3 { color: #2c3e50; margin-bottom: 15px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    label { font-size: 14px; font-weight: bold; color: #555; }
-    input, select, textarea, button { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
-    button { background-color: #27ae60; color: white; border: none; font-weight: bold; cursor: pointer; font-size: 15px; }
-    button:hover { background-color: #219150; }
-    button.btn-danger { background-color: #e74c3c; }
-    button.btn-export { background-color: #2980b9; width: auto; padding: 8px 15px; margin-bottom: 0; }
-    button.btn-edit { background-color: #f39c12; width: auto; padding: 5px 10px; }
-    button.btn-delete { background-color: #e74c3c; width: auto; padding: 5px 10px; }
-    .card-resumo { background: #34495e; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; position: relative; }
-    .card-resumo p { margin: 5px 0; font-size: 15px; }
-    .btn-logout { position: absolute; top: 15px; right: 15px; background: #e74c3c; width: auto; padding: 5px 12px; font-size: 12px; }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: #f8f9fa; padding: 10px; border-radius: 6px; }
-    .toolbar div { display: flex; align-items: center; gap: 10px; }
-    .toolbar input { margin: 0; width: auto; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 13px; }
-    th { background-color: #f8f9fa; }
-    .hidden { display: none; }
-    .tab-toggle { text-align: center; margin-top: 10px; cursor: pointer; color: #2980b9; text-decoration: underline; font-size: 14px; }
+    :root { --navy:#102a43; --ink:#243b53; --muted:#627d98; --line:#d9e2ec; --surface:#fff; --canvas:#f4f7fb; --primary:#176b87; --primary-dark:#12566d; --accent:#eab308; --danger:#d64545; --success:#16805c; }
+    * { box-sizing: border-box; }
+    body { min-height:100vh; margin:0; padding:32px 20px; font-family:'DM Sans', sans-serif; color:var(--ink); background:radial-gradient(circle at 10% 0%, #dff4f5 0, transparent 29rem), var(--canvas); }
+    .container { width:100%; max-width:1120px; margin:0 auto; }
+    h2,h3 { font-family:'Manrope', sans-serif; color:var(--navy); letter-spacing:-.035em; }
+    h2 { font-size:clamp(1.65rem, 4vw, 2.2rem); margin:0 0 8px; } h3 { font-size:1.12rem; margin:0; }
+    label { display:block; font-size:.84rem; font-weight:700; color:#486581; margin-bottom:7px; }
+    input,select,textarea { width:100%; min-height:45px; padding:11px 13px; font:inherit; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:9px; transition:border-color .2s, box-shadow .2s; }
+    textarea { min-height:76px; resize:vertical; } input:focus,select:focus,textarea:focus { outline:0; border-color:var(--primary); box-shadow:0 0 0 3px rgba(23,107,135,.12); }
+    button { display:inline-flex; justify-content:center; align-items:center; gap:7px; min-height:45px; padding:11px 17px; border:0; border-radius:9px; font:700 .9rem 'DM Sans',sans-serif; color:#fff; background:var(--primary); cursor:pointer; transition:transform .15s, background .2s, box-shadow .2s; }
+    button:hover { background:var(--primary-dark); transform:translateY(-1px); box-shadow:0 7px 14px rgba(18,86,109,.18); }
+    .hidden { display:none !important; }
+    #secao-auth { width:min(100%, 450px); margin:8vh auto; padding:38px; background:rgba(255,255,255,.94); border:1px solid rgba(255,255,255,.8); border-radius:20px; box-shadow:0 20px 55px rgba(36,59,83,.14); }
+    #secao-auth::before { content:'HORAS+ • GESTÃO CLT'; display:block; margin-bottom:26px; font:800 .72rem 'Manrope',sans-serif; letter-spacing:.11em; color:var(--primary); }
+    #formAuth > div { margin-bottom:16px; } #formAuth button { width:100%; margin-top:8px; }
+    .tab-toggle { margin-top:20px; text-align:center; color:var(--primary); cursor:pointer; font-size:.9rem; font-weight:700; } .tab-toggle:hover { text-decoration:underline; }
+    #secao-principal { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(295px,.85fr); gap:22px; align-items:start; }
+    .card-resumo { grid-column:1/-1; position:relative; overflow:hidden; padding:27px 30px; color:#fff; background:linear-gradient(120deg,#102a43,#176b87); border-radius:18px; box-shadow:0 16px 30px rgba(16,42,67,.2); }
+    .card-resumo::after { content:''; position:absolute; width:230px; height:230px; right:-85px; top:-130px; border:36px solid rgba(255,255,255,.08); border-radius:50%; }
+    .card-resumo h3 { position:relative; color:#fff; font-size:1.35rem; margin-bottom:12px; }.card-resumo p { position:relative; margin:5px 0; color:#e3f2f4; font-size:.94rem; }.card-resumo hr { position:relative; margin:17px 0 13px; border:0; border-top:1px solid rgba(255,255,255,.22) !important; }
+    .card-resumo p:last-child { color:#fff; font-size:1.18rem !important; }.card-resumo p:last-child strong { color:#7ee7bf; }
+    .btn-logout { position:absolute; z-index:1; top:22px; right:24px; min-height:auto; width:auto; padding:8px 12px; font-size:.78rem; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); }.btn-logout:hover { background:var(--danger); }
+    .toolbar,.form-card,.records-card { background:var(--surface); border:1px solid #e6edf3; border-radius:14px; box-shadow:0 5px 17px rgba(36,59,83,.06); }.toolbar { grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; gap:16px; padding:15px 18px; margin:0; }.toolbar div { display:flex; align-items:center; gap:12px; }.toolbar label { margin:0; white-space:nowrap; }.toolbar input { width:auto; min-height:40px; padding:8px 10px; }.btn-export { width:auto; min-height:40px; padding:9px 14px; background:#edf6f8; color:var(--primary); }.btn-export:hover { background:#d9eef2; box-shadow:none; }
+    .form-card { padding:24px; }.form-card h3,.records-card h3 { margin-bottom:20px; }.grid { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }.grid > div { margin-bottom:15px; } #formLancamento > label { margin-top:2px; } #formLancamento textarea { margin-bottom:16px; } #btnSalvar { width:100%; }.btn-danger { width:100%; margin-top:9px; background:#fff1f1; color:var(--danger); }.btn-danger:hover { background:#fee2e2; box-shadow:none; }
+    .records-card { padding:24px; overflow:hidden; }.table-wrap { overflow-x:auto; margin:0 -24px -24px; padding:0 24px; } table { width:100%; min-width:670px; border-collapse:collapse; } th,td { padding:13px 10px; text-align:left; border-bottom:1px solid #edf2f7; font-size:.84rem; } th { color:#627d98; background:#f8fafc; font-size:.72rem; letter-spacing:.045em; text-transform:uppercase; white-space:nowrap; } td { color:#334e68; } tbody tr:last-child td { border:0; } tbody tr:hover { background:#f8fcfc; }
+    .btn-edit,.btn-delete { width:auto; min-height:33px; padding:6px 9px; border-radius:7px; font-size:.76rem; }.btn-edit { background:#fff6dd; color:#9a6700; }.btn-edit:hover { background:#fdebb4; box-shadow:none; }.btn-delete { margin-left:4px; background:#fff0f0; color:var(--danger); }.btn-delete:hover { background:#ffdede; box-shadow:none; }
+    @media (max-width:760px) { body { padding:16px 12px; } #secao-auth { margin:3vh auto; padding:27px 21px; } #secao-principal { display:block; }.card-resumo { padding:24px 20px; margin-bottom:14px; }.card-resumo h3 { max-width:190px; }.btn-logout { top:18px; right:16px; }.toolbar { margin-bottom:14px; align-items:stretch; flex-direction:column; }.toolbar div { align-items:stretch; flex-direction:column; gap:5px; }.toolbar input,.btn-export { width:100%; }.form-card,.records-card { padding:19px 16px; margin-bottom:14px; }.grid { grid-template-columns:1fr; }.table-wrap { margin:0 -16px -19px; padding:0 16px; } }
   </style>
 </head>
 <body>
@@ -79,6 +87,7 @@
         <button class="btn-export" onclick="exportarCSV()">Exportar CSV</button>
       </div>
 
+      <section class="form-card">
       <h3 id="tituloForm">Lançar Hora Extra</h3>
       <form id="formLancamento">
         <input type="hidden" id="lancamentoId">
@@ -108,9 +117,11 @@
         <button type="submit" id="btnSalvar">Salvar Lançamento</button>
         <button type="button" id="btnCancelar" class="btn-danger hidden" onclick="limparFormulario()">Cancelar</button>
       </form>
+      </section>
 
+      <section class="records-card">
       <h3>Lançamentos Registrados</h3>
-      <table>
+      <div class="table-wrap"><table>
         <thead>
           <tr>
             <th>Data</th>
@@ -123,7 +134,8 @@
           </tr>
         </thead>
         <tbody id="tabelaCorpo"></tbody>
-      </table>
+      </table></div>
+      </section>
     </div>
 
   </div>

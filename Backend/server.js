@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -11,33 +11,38 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro_clt';
 app.use(cors());
 app.use(express.json());
 
-// Conexão com o Banco de Dados
-const db = new Database('database.db');
+// Conexão com o banco PostgreSQL no Supabase
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-// Criar tabelas com suporte a multi-usuário
-db.exec(`
-  CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    senha TEXT NOT NULL,
-    cargo TEXT,
-    salario REAL DEFAULT 0
-  );
+// Inicialização e criação automática das tabelas no PostgreSQL
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id SERIAL PRIMARY KEY,
+      nome VARCHAR(255) NOT NULL,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      senha VARCHAR(255) NOT NULL,
+      cargo VARCHAR(255),
+      salario NUMERIC DEFAULT 0
+    );
 
-  CREATE TABLE IF NOT EXISTS lancamentos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario_id INTEGER NOT NULL,
-    data TEXT NOT NULL,
-    horaInicio TEXT NOT NULL,
-    horaFim TEXT NOT NULL,
-    porcentagem REAL NOT NULL,
-    justificativa TEXT,
-    totalHoras REAL NOT NULL,
-    valorTotalItem REAL NOT NULL,
-    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
-  );
-`);
+    CREATE TABLE IF NOT EXISTS lancamentos (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      data VARCHAR(10) NOT NULL,
+      hora_inicio VARCHAR(5) NOT NULL,
+      hora_fim VARCHAR(5) NOT NULL,
+      porcentagem NUMERIC NOT NULL,
+      justificativa TEXT,
+      total_horas NUMERIC NOT NULL,
+      valor_total_item NUMERIC NOT NULL
+    );
+  `);
+}
+initDb().catch(console.error);
 
 // Middleware de Autenticação JWT
 function autenticarToken(req, res, next) {
@@ -60,13 +65,12 @@ function calcularHoras(inicio, fim) {
   let minInicio = hI * 60 + mI;
   let minFim = hF * 60 + mF;
 
-  if (minFim < minInicio) minFim += 24 * 60; // Trata virada da noite
+  if (minFim < minInicio) minFim += 24 * 60;
   return (minFim - minInicio) / 60;
 }
 
 // --- ROTAS DE AUTENTICAÇÃO ---
 
-// Cadastrar Conta
 app.post('/api/auth/register', async (req, res) => {
   const { nome, email, senha, cargo, salario } = req.body;
   if (!nome || !email || !senha) {
@@ -75,22 +79,24 @@ app.post('/api/auth/register', async (req, res) => {
 
   try {
     const senhaHash = await bcrypt.hash(senha, 10);
-    const stmt = db.prepare('INSERT INTO usuarios (nome, email, senha, cargo, salario) VALUES (?, ?, ?, ?, ?)');
-    const info = stmt.run(nome, email, senhaHash, cargo || '', salario || 0);
+    const result = await pool.query(
+      'INSERT INTO usuarios (nome, email, senha, cargo, salario) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [nome, email, senhaHash, cargo || '', salario || 0]
+    );
 
-    res.status(201).json({ message: 'Conta criada com sucesso!', id: info.lastInsertRowid });
+    res.status(201).json({ message: 'Conta criada com sucesso!', id: result.rows[0].id });
   } catch (err) {
-    if (err.message.includes('UNIQUE constraint failed')) {
+    if (err.code === '23505') { // Código de erro de valor duplicado no Postgres
       return res.status(400).json({ error: 'Este e-mail já está cadastrado.' });
     }
     res.status(500).json({ error: 'Erro ao criar conta.' });
   }
 });
 
-// Login
 app.post('/api/auth/login', async (req, res) => {
   const { email, senha } = req.body;
-  const usuario = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email);
+  const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+  const usuario = result.rows[0];
 
   if (!usuario || !(await bcrypt.compare(senha, usuario.senha))) {
     return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
@@ -100,37 +106,35 @@ app.post('/api/auth/login', async (req, res) => {
 
   res.json({
     token,
-    usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, cargo: usuario.cargo, salario: usuario.salario }
+    usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, cargo: usuario.cargo, salario: parseFloat(usuario.salario) }
   });
-});
-
-// Atualizar Dados do Perfil do Usuário
-app.put('/api/usuario/perfil', autenticarToken, (req, res) => {
-  const { cargo, salario } = req.body;
-  db.prepare('UPDATE usuarios SET cargo = ?, salario = ? WHERE id = ?').run(cargo, salario, req.user.id);
-  res.json({ message: 'Perfil atualizado!' });
 });
 
 // --- ROTAS DE LANÇAMENTOS (PROTEGIDAS) ---
 
-// Obter Extrato / Resumo
-app.get('/api/lancamentos', autenticarToken, (req, res) => {
+app.get('/api/lancamentos', autenticarToken, async (req, res) => {
   const { mesAno } = req.query;
-  const usuario = db.prepare('SELECT id, nome, email, cargo, salario FROM usuarios WHERE id = ?').get(req.user.id);
+  const userResult = await pool.query('SELECT id, nome, email, cargo, salario FROM usuarios WHERE id = $1', [req.user.id]);
+  const usuario = userResult.rows[0];
 
-  let query = 'SELECT * FROM lancamentos WHERE usuario_id = ?';
+  let query = 'SELECT id, data, hora_inicio AS "horaInicio", hora_fim AS "horaFim", porcentagem, justificativa, total_horas AS "totalHoras", valor_total_item AS "valorTotalItem" FROM lancamentos WHERE usuario_id = $1';
   const params = [req.user.id];
 
   if (mesAno) {
-    query += ' AND data LIKE ?';
+    query += ' AND data LIKE $2';
     params.push(`${mesAno}%`);
   }
   query += ' ORDER BY data DESC';
 
-  const lancamentos = db.prepare(query).all(...params);
+  const lancamentosResult = await pool.query(query, params);
+  const lancamentos = lancamentosResult.rows.map(l => ({
+    ...l,
+    porcentagem: parseFloat(l.porcentagem),
+    totalHoras: parseFloat(l.totalHoras),
+    valorTotalItem: parseFloat(l.valorTotalItem)
+  }));
 
-  // Cálculos CLT
-  const salario = usuario ? usuario.salario : 0;
+  const salario = usuario ? parseFloat(usuario.salario) : 0;
   const valorHoraNormal = salario / 220;
 
   let totalHoras = 0;
@@ -141,7 +145,7 @@ app.get('/api/lancamentos', autenticarToken, (req, res) => {
     totalReceberHE += l.valorTotalItem;
   });
 
-  const valorDSR = totalReceberHE * (1 / 6); // Estimativa DSR CLT (1/6 da soma)
+  const valorDSR = totalReceberHE * (1 / 6);
   const totalGeral = totalReceberHE + valorDSR;
 
   res.json({
@@ -151,50 +155,49 @@ app.get('/api/lancamentos', autenticarToken, (req, res) => {
   });
 });
 
-// Salvar Lançamento
-app.post('/api/lancamentos', autenticarToken, (req, res) => {
+app.post('/api/lancamentos', autenticarToken, async (req, res) => {
   const { data, horaInicio, horaFim, porcentagem, justificativa } = req.body;
-  const usuario = db.prepare('SELECT salario FROM usuarios WHERE id = ?').get(req.user.id);
+  const userResult = await pool.query('SELECT salario FROM usuarios WHERE id = $1', [req.user.id]);
+  const usuario = userResult.rows[0];
 
   const totalHoras = calcularHoras(horaInicio, horaFim);
-  const valorHoraNormal = usuario ? usuario.salario / 220 : 0;
+  const valorHoraNormal = usuario ? parseFloat(usuario.salario) / 220 : 0;
   const fatorAdicional = 1 + parseFloat(porcentagem) / 100;
   const valorTotalItem = totalHoras * valorHoraNormal * fatorAdicional;
 
-  const stmt = db.prepare(`
-    INSERT INTO lancamentos (usuario_id, data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(req.user.id, data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem);
+  await pool.query(
+    `INSERT INTO lancamentos (usuario_id, data, hora_inicio, hora_fim, porcentagem, justificativa, total_horas, valor_total_item)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [req.user.id, data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem]
+  );
 
   res.status(201).json({ message: 'Lançamento salvo!' });
 });
 
-// Editar Lançamento
-app.put('/api/lancamentos/:id', autenticarToken, (req, res) => {
+app.put('/api/lancamentos/:id', autenticarToken, async (req, res) => {
   const { id } = req.params;
   const { data, horaInicio, horaFim, porcentagem, justificativa } = req.body;
-  const usuario = db.prepare('SELECT salario FROM usuarios WHERE id = ?').get(req.user.id);
+  const userResult = await pool.query('SELECT salario FROM usuarios WHERE id = $1', [req.user.id]);
+  const usuario = userResult.rows[0];
 
   const totalHoras = calcularHoras(horaInicio, horaFim);
-  const valorHoraNormal = usuario ? usuario.salario / 220 : 0;
+  const valorHoraNormal = usuario ? parseFloat(usuario.salario) / 220 : 0;
   const fatorAdicional = 1 + parseFloat(porcentagem) / 100;
   const valorTotalItem = totalHoras * valorHoraNormal * fatorAdicional;
 
-  const stmt = db.prepare(`
-    UPDATE lancamentos 
-    SET data = ?, horaInicio = ?, horaFim = ?, porcentagem = ?, justificativa = ?, totalHoras = ?, valorTotalItem = ?
-    WHERE id = ? AND usuario_id = ?
-  `);
-  stmt.run(data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem, id, req.user.id);
+  await pool.query(
+    `UPDATE lancamentos 
+     SET data = $1, hora_inicio = $2, hora_fim = $3, porcentagem = $4, justificativa = $5, total_horas = $6, valor_total_item = $7
+     WHERE id = $8 AND usuario_id = $9`,
+    [data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem, id, req.user.id]
+  );
 
   res.json({ message: 'Lançamento atualizado!' });
 });
 
-// Deletar Lançamento
-app.delete('/api/lancamentos/:id', autenticarToken, (req, res) => {
+app.delete('/api/lancamentos/:id', autenticarToken, async (req, res) => {
   const { id } = req.params;
-  db.prepare('DELETE FROM lancamentos WHERE id = ? AND usuario_id = ?').run(id, req.user.id);
+  await pool.query('DELETE FROM lancamentos WHERE id = $1 AND usuario_id = $2', [id, req.user.id]);
   res.json({ message: 'Lançamento excluído!' });
 });
 
