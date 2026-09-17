@@ -1,181 +1,203 @@
 const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro_clt';
 
-// Permite requisições de origens externas em produção
 app.use(cors());
 app.use(express.json());
 
+// Conexão com o Banco de Dados
 const db = new Database('database.db');
 
+// Criar tabelas com suporte a multi-usuário
 db.exec(`
-  CREATE TABLE IF NOT EXISTS usuario (
+  CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT NOT NULL,
-    cargo TEXT NOT NULL,
-    salario REAL NOT NULL
+    email TEXT UNIQUE NOT NULL,
+    senha TEXT NOT NULL,
+    cargo TEXT,
+    salario REAL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS lancamentos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
     data TEXT NOT NULL,
     horaInicio TEXT NOT NULL,
     horaFim TEXT NOT NULL,
-    porcentagem INTEGER NOT NULL,
+    porcentagem REAL NOT NULL,
+    justificativa TEXT,
     totalHoras REAL NOT NULL,
-    justificativa TEXT NOT NULL
+    valorTotalItem REAL NOT NULL,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
   );
 `);
 
-// Função para calcular horas normais e noturnas (entre 22h e 5h)
-function calcularHorasDetalhadas(inicio, fim) {
-  const [h1, m1] = inicio.split(':').map(Number);
-  const [h2, m2] = fim.split(':').map(Number);
+// Middleware de Autenticação JWT
+function autenticarToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
-  let inicioMin = h1 * 60 + m1;
-  let fimMin = h2 * 60 + m2;
+  if (!token) return res.status(401).json({ error: 'Acesso negado. Faça login.' });
 
-  if (fimMin <= inicioMin) {
-    fimMin += 24 * 60; // Virada de dia
-  }
-
-  let minutosDiurnos = 0;
-  let minutosNoturnos = 0;
-
-  for (let m = inicioMin; m < fimMin; m++) {
-    let horaDoDia = Math.floor((m % (24 * 60)) / 60);
-    if (horaDoDia >= 22 || horaDoDia < 5) {
-      minutosNoturnos++;
-    } else {
-      minutosDiurnos++;
-    }
-  }
-
-  const horasDiurnas = minutosDiurnos / 60;
-  const horasNoturnas = (minutosNoturnos / 60) * 1.142857; // Fator noturno CLT
-
-  return {
-    horasDiurnas,
-    horasNoturnas,
-    totalHorasComputadas: horasDiurnas + horasNoturnas
-  };
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Sessão expirada. Faça login novamente.' });
+    req.user = user;
+    next();
+  });
 }
 
-// Rota: Buscar usuário
-app.get('/api/usuario', (req, res) => {
-  const usuario = db.prepare('SELECT * FROM usuario ORDER BY id DESC LIMIT 1').get();
-  if (!usuario) return res.json(null);
-  const valorHoraNormal = usuario.salario / 220;
-  res.json({ ...usuario, valorHoraNormal });
+// Auxiliar: Cálculo de Horas Extras
+function calcularHoras(inicio, fim) {
+  const [hI, mI] = inicio.split(':').map(Number);
+  const [hF, mF] = fim.split(':').map(Number);
+  let minInicio = hI * 60 + mI;
+  let minFim = hF * 60 + mF;
+
+  if (minFim < minInicio) minFim += 24 * 60; // Trata virada da noite
+  return (minFim - minInicio) / 60;
+}
+
+// --- ROTAS DE AUTENTICAÇÃO ---
+
+// Cadastrar Conta
+app.post('/api/auth/register', async (req, res) => {
+  const { nome, email, senha, cargo, salario } = req.body;
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
+  }
+
+  try {
+    const senhaHash = await bcrypt.hash(senha, 10);
+    const stmt = db.prepare('INSERT INTO usuarios (nome, email, senha, cargo, salario) VALUES (?, ?, ?, ?, ?)');
+    const info = stmt.run(nome, email, senhaHash, cargo || '', salario || 0);
+
+    res.status(201).json({ message: 'Conta criada com sucesso!', id: info.lastInsertRowid });
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Este e-mail já está cadastrado.' });
+    }
+    res.status(500).json({ error: 'Erro ao criar conta.' });
+  }
 });
 
-// Rota: Cadastrar usuário
-app.post('/api/usuario', (req, res) => {
-  const { nome, cargo, salario } = req.body;
-  if (!nome || !cargo || !salario) return res.status(400).json({ error: 'Campos obrigatórios.' });
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  const { email, senha } = req.body;
+  const usuario = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email);
 
-  const salarioNum = parseFloat(salario);
-  db.prepare('DELETE FROM usuario').run();
-  const stmt = db.prepare('INSERT INTO usuario (nome, cargo, salario) VALUES (?, ?, ?)');
-  stmt.run(nome, cargo, salarioNum);
+  if (!usuario || !(await bcrypt.compare(senha, usuario.senha))) {
+    return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
+  }
 
-  res.status(201).json({ nome, cargo, salario: salarioNum });
+  const token = jwt.sign({ id: usuario.id, email: usuario.email }, JWT_SECRET, { expiresIn: '7d' });
+
+  res.json({
+    token,
+    usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, cargo: usuario.cargo, salario: usuario.salario }
+  });
 });
 
-// Rota: Listar lançamentos
-app.get('/api/lancamentos', (req, res) => {
-  const usuario = db.prepare('SELECT * FROM usuario ORDER BY id DESC LIMIT 1').get();
-  if (!usuario) return res.status(400).json({ error: 'Cadastre o usuário primeiro' });
+// Atualizar Dados do Perfil do Usuário
+app.put('/api/usuario/perfil', autenticarToken, (req, res) => {
+  const { cargo, salario } = req.body;
+  db.prepare('UPDATE usuarios SET cargo = ?, salario = ? WHERE id = ?').run(cargo, salario, req.user.id);
+  res.json({ message: 'Perfil atualizado!' });
+});
 
+// --- ROTAS DE LANÇAMENTOS (PROTEGIDAS) ---
+
+// Obter Extrato / Resumo
+app.get('/api/lancamentos', autenticarToken, (req, res) => {
   const { mesAno } = req.query;
-  let query = 'SELECT * FROM lancamentos';
-  let params = [];
+  const usuario = db.prepare('SELECT id, nome, email, cargo, salario FROM usuarios WHERE id = ?').get(req.user.id);
+
+  let query = 'SELECT * FROM lancamentos WHERE usuario_id = ?';
+  const params = [req.user.id];
 
   if (mesAno) {
-    query += ' WHERE data LIKE ?';
+    query += ' AND data LIKE ?';
     params.push(`${mesAno}%`);
   }
-  query += ' ORDER BY data DESC, id DESC';
+  query += ' ORDER BY data DESC';
 
-  const lista = db.prepare(query).all(...params);
-  const valorHoraNormal = usuario.salario / 220;
+  const lancamentos = db.prepare(query).all(...params);
+
+  // Cálculos CLT
+  const salario = usuario ? usuario.salario : 0;
+  const valorHoraNormal = salario / 220;
 
   let totalHoras = 0;
   let totalReceberHE = 0;
 
-  const listaCalculada = lista.map(l => {
-    const detalhe = calcularHorasDetalhadas(l.horaInicio, l.horaFim);
-    const multiplicadorHE = 1 + (l.porcentagem / 100);
-
-    const valorHoraDiurna = valorHoraNormal * multiplicadorHE;
-    const valorHoraNoturna = (valorHoraNormal * 1.20) * multiplicadorHE;
-
-    const valorTotalDiurno = detalhe.horasDiurnas * valorHoraDiurna;
-    const valorTotalNoturno = detalhe.horasNoturnas * valorHoraNoturna;
-    const valorTotalItem = valorTotalDiurno + valorTotalNoturno;
-
-    totalHoras += detalhe.totalHorasComputadas;
-    totalReceberHE += valorTotalItem;
-
-    return {
-      ...l,
-      horasDiurnas: detalhe.horasDiurnas,
-      horasNoturnas: detalhe.horasNoturnas,
-      totalHoras: detalhe.totalHorasComputadas,
-      valorTotalItem
-    };
+  lancamentos.forEach(l => {
+    totalHoras += l.totalHoras;
+    totalReceberHE += l.valorTotalItem;
   });
 
-  const valorDSR = (totalReceberHE / 22) * 4;
+  const valorDSR = totalReceberHE * (1 / 6); // Estimativa DSR CLT (1/6 da soma)
   const totalGeral = totalReceberHE + valorDSR;
 
   res.json({
-    usuario: { ...usuario, valorHoraNormal },
-    lancamentos: listaCalculada,
-    resumo: {
-      totalHoras,
-      valorHoraNormal,
-      totalReceberHE,
-      valorDSR,
-      totalGeral
-    }
+    usuario,
+    resumo: { valorHoraNormal, totalHoras, totalReceberHE, valorDSR, totalGeral },
+    lancamentos
   });
 });
 
-// Rota: Criar lançamento
-app.post('/api/lancamentos', (req, res) => {
+// Salvar Lançamento
+app.post('/api/lancamentos', autenticarToken, (req, res) => {
   const { data, horaInicio, horaFim, porcentagem, justificativa } = req.body;
-  const detalhe = calcularHorasDetalhadas(horaInicio, horaFim);
+  const usuario = db.prepare('SELECT salario FROM usuarios WHERE id = ?').get(req.user.id);
+
+  const totalHoras = calcularHoras(horaInicio, horaFim);
+  const valorHoraNormal = usuario ? usuario.salario / 220 : 0;
+  const fatorAdicional = 1 + parseFloat(porcentagem) / 100;
+  const valorTotalItem = totalHoras * valorHoraNormal * fatorAdicional;
 
   const stmt = db.prepare(`
-    INSERT INTO lancamentos (data, horaInicio, horaFim, porcentagem, totalHoras, justificativa)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO lancamentos (usuario_id, data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const info = stmt.run(data, horaInicio, horaFim, parseInt(porcentagem), detalhe.totalHorasComputadas, justificativa);
-  res.status(201).json({ id: info.lastInsertRowid });
+  stmt.run(req.user.id, data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem);
+
+  res.status(201).json({ message: 'Lançamento salvo!' });
 });
 
-// Rota: Editar lançamento
-app.put('/api/lancamentos/:id', (req, res) => {
+// Editar Lançamento
+app.put('/api/lancamentos/:id', autenticarToken, (req, res) => {
   const { id } = req.params;
   const { data, horaInicio, horaFim, porcentagem, justificativa } = req.body;
-  const detalhe = calcularHorasDetalhadas(horaInicio, horaFim);
+  const usuario = db.prepare('SELECT salario FROM usuarios WHERE id = ?').get(req.user.id);
+
+  const totalHoras = calcularHoras(horaInicio, horaFim);
+  const valorHoraNormal = usuario ? usuario.salario / 220 : 0;
+  const fatorAdicional = 1 + parseFloat(porcentagem) / 100;
+  const valorTotalItem = totalHoras * valorHoraNormal * fatorAdicional;
 
   const stmt = db.prepare(`
-    UPDATE lancamentos SET data = ?, horaInicio = ?, horaFim = ?, porcentagem = ?, totalHoras = ?, justificativa = ? WHERE id = ?
+    UPDATE lancamentos 
+    SET data = ?, horaInicio = ?, horaFim = ?, porcentagem = ?, justificativa = ?, totalHoras = ?, valorTotalItem = ?
+    WHERE id = ? AND usuario_id = ?
   `);
-  stmt.run(data, horaInicio, horaFim, parseInt(porcentagem), detalhe.totalHorasComputadas, justificativa, id);
-  res.json({ message: 'Atualizado com sucesso.' });
+  stmt.run(data, horaInicio, horaFim, porcentagem, justificativa, totalHoras, valorTotalItem, id, req.user.id);
+
+  res.json({ message: 'Lançamento atualizado!' });
 });
 
-// Rota: Excluir lançamento
-app.delete('/api/lancamentos/:id', (req, res) => {
-  db.prepare('DELETE FROM lancamentos WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Excluído com sucesso.' });
+// Deletar Lançamento
+app.delete('/api/lancamentos/:id', autenticarToken, (req, res) => {
+  const { id } = req.params;
+  db.prepare('DELETE FROM lancamentos WHERE id = ? AND usuario_id = ?').run(id, req.user.id);
+  res.json({ message: 'Lançamento excluído!' });
 });
 
-// Configuração de Porta Dinâmica para Produção
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
