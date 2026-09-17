@@ -1,0 +1,17 @@
+# Dependências instaladas localmente
+node_modules/
+
+# Segredos e configurações locais
+**/.env
+**/.env.*
+!**/.env.example
+
+# Bancos e arquivos locais
+*.db
+*.sqlite
+*.sqlite3
+
+# Saídas de ferramentas
+coverage/
+.DS_Store
+Thumbs.db

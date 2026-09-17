@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -6,16 +8,42 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro_clt';
+const JWT_SECRET = process.env.JWT_SECRET;
+const allowedOrigins = (process.env.FRONTEND_ORIGIN || 'http://localhost:5500')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(cors({
+  origin(origin, callback) {
+    // Requisições sem Origin são usadas por health checks e ferramentas do servidor.
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origem não permitida pelo CORS.'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: '100kb' }));
 
-// Conexão com o banco PostgreSQL no Supabase
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL não configurada. Adicione a connection string do Supabase nas variáveis de ambiente.');
+}
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET não configurada. Defina uma chave segura nas variáveis de ambiente.');
+}
+
+// Conexão PostgreSQL do Supabase. O pool limita as conexões do servidor.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
 });
+
+pool.on('error', (err) => console.error('Erro inesperado no pool PostgreSQL:', err));
 
 // Inicialização e criação automática das tabelas no PostgreSQL
 async function initDb() {
@@ -42,7 +70,14 @@ async function initDb() {
     );
   `);
 }
-initDb().catch(console.error);
+app.get('/api/health', async (req, res, next) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'supabase-postgres' });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Middleware de Autenticação JWT
 function autenticarToken(req, res, next) {
@@ -201,6 +236,20 @@ app.delete('/api/lancamentos/:id', autenticarToken, async (req, res) => {
   res.json({ message: 'Lançamento excluído!' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+app.use((err, req, res, next) => {
+  console.error('Erro na API:', err);
+  res.status(500).json({ error: 'Não foi possível processar a solicitação.' });
 });
+
+async function startServer() {
+  try {
+    await initDb();
+    await pool.query('SELECT 1');
+    app.listen(PORT, () => console.log(`API conectada ao Supabase e rodando na porta ${PORT}`));
+  } catch (err) {
+    console.error('Não foi possível conectar ao Supabase. Verifique DATABASE_URL e as configurações de rede.', err.message);
+    process.exit(1);
+  }
+}
+
+startServer();

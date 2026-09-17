@@ -14,7 +14,7 @@ Aplicação web full-stack desenvolvida para auxílio no registro, gestão e cá
 ## 🚀 Tecnologias Utilizadas
 
 * **Backend:** Node.js, Express, CORS
-* **Banco de Dados:** SQLite (`better-sqlite3`)
+* **Banco de Dados:** PostgreSQL hospedado no Supabase (`pg`)
 * **Frontend:** HTML5, CSS3, JavaScript (Vanilla JS)
 * **Hospedagem:** Render (Backend API) e Vercel (Frontend)
 
@@ -34,3 +34,12 @@ Aplicação web full-stack desenvolvida para auxílio no registro, gestão e cá
   * Filtro de lançamentos por mês/ano.
   * Exportação do extrato em formato **CSV**.
   * Gerenciamento completo (**CRUD** - Criar, Editar e Excluir registros).
+
+---
+
+## Configuração do Supabase
+
+1. No painel do Supabase, abra **Connect** e copie a connection string do **Session pooler**.
+2. Copie `Backend/.env.example` para `Backend/.env` e preencha `DATABASE_URL`, `JWT_SECRET` e `FRONTEND_ORIGIN`.
+3. Para publicar no Render, adicione essas mesmas variáveis no serviço em **Environment**. Não envie o arquivo `.env` ao repositório.
+4. Na primeira inicialização a API cria automaticamente as tabelas `usuarios` e `lancamentos`. Confirme a conexão em `GET /api/health`.
