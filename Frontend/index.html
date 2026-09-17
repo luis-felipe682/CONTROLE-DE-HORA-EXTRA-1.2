@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Calculadora de Horas Extras - CLT</title>
+  <title>Controle de Horas Extras - CLT</title>
   <style>
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
     .container { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 850px; }
@@ -14,10 +14,11 @@
     button:hover { background-color: #219150; }
     button.btn-danger { background-color: #e74c3c; }
     button.btn-export { background-color: #2980b9; width: auto; padding: 8px 15px; margin-bottom: 0; }
-    button.btn-edit { background-color: #f39c12; margin-right: 5px; width: auto; padding: 5px 10px; }
+    button.btn-edit { background-color: #f39c12; width: auto; padding: 5px 10px; }
     button.btn-delete { background-color: #e74c3c; width: auto; padding: 5px 10px; }
-    .card-resumo { background: #34495e; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .card-resumo { background: #34495e; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; position: relative; }
     .card-resumo p { margin: 5px 0; font-size: 15px; }
+    .btn-logout { position: absolute; top: 15px; right: 15px; background: #e74c3c; width: auto; padding: 5px 12px; font-size: 12px; }
     .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: #f8f9fa; padding: 10px; border-radius: 6px; }
     .toolbar div { display: flex; align-items: center; gap: 10px; }
     .toolbar input { margin: 0; width: auto; }
@@ -25,28 +26,41 @@
     th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 13px; }
     th { background-color: #f8f9fa; }
     .hidden { display: none; }
+    .tab-toggle { text-align: center; margin-top: 10px; cursor: pointer; color: #2980b9; text-decoration: underline; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="container">
     
-    <!-- Tela 1: Cadastro -->
-    <div id="secao-cadastro">
-      <h2>Dados do Colaborador</h2>
-      <form id="formCadastro">
-        <label>Nome Completo:</label>
-        <input type="text" id="nome" required placeholder="Ex: João da Silva">
-        <label>Cargo:</label>
-        <input type="text" id="cargo" required placeholder="Ex: Desenvolvedor">
-        <label>Salário Atual (R$):</label>
-        <input type="number" id="salario" step="0.01" required placeholder="Ex: 3000.00">
-        <button type="submit">Cadastrar e Iniciar</button>
+    <!-- Tela de Autenticação (Login / Cadastro) -->
+    <div id="secao-auth">
+      <h2 id="tituloAuth">Entrar no Sistema</h2>
+      <form id="formAuth">
+        <div id="campoNome" class="hidden">
+          <label>Nome Completo:</label>
+          <input type="text" id="authNome" placeholder="Ex: João Silva">
+        </div>
+        <label>E-mail:</label>
+        <input type="email" id="authEmail" required placeholder="seuemail@email.com">
+        <label>Senha:</label>
+        <input type="password" id="authSenha" required placeholder="******">
+        
+        <div id="camposAdicionais" class="hidden">
+          <label>Cargo:</label>
+          <input type="text" id="authCargo" placeholder="Ex: Analista">
+          <label>Salário Base (R$):</label>
+          <input type="number" id="authSalario" step="0.01" placeholder="Ex: 3000.00">
+        </div>
+
+        <button type="submit" id="btnAuth">Entrar</button>
       </form>
+      <div class="tab-toggle" id="alternarModo" onclick="alternarModoAuth()">Não possui conta? Cadastre-se aqui</div>
     </div>
 
-    <!-- Tela 2: Painel Principal -->
+    <!-- Tela Principal do Usuário -->
     <div id="secao-principal" class="hidden">
       <div class="card-resumo">
+        <button class="btn-logout" onclick="fazerLogout()">Sair</button>
         <h3 style="color: #ecf0f1; margin-top:0;">Perfil e Extrato CLT</h3>
         <p><strong>Colaborador:</strong> <span id="resNome">-</span> (<span id="resCargo">-</span>)</p>
         <p><strong>Salário:</strong> R$ <span id="resSalario">0.00</span> | <strong>Valor Hora Base:</strong> R$ <span id="resHoraBase">0.00</span></p>
@@ -115,96 +129,121 @@
   </div>
 
   <script>
-    // URL apontando para a API publicada no Render
     const API_URL = 'https://controle-de-hora-extra-1-2.onrender.com/api';
+    let modoCadastro = false;
     let dadosAtuais = null;
 
-    async function verificarUsuario() {
-      try {
-        const res = await fetch(`${API_URL}/usuario`);
-        const usuario = await res.json();
-        if (usuario && usuario.nome) {
-          exibirPainel();
+    function token() { return localStorage.getItem('token_clt'); }
+
+    function alternarModoAuth() {
+      modoCadastro = !modoCadastro;
+      document.getElementById('tituloAuth').innerText = modoCadastro ? 'Criar Nova Conta' : 'Entrar no Sistema';
+      document.getElementById('btnAuth').innerText = modoCadastro ? 'Cadastrar' : 'Entrar';
+      document.getElementById('alternarModo').innerText = modoCadastro ? 'Já possui conta? Faça Login' : 'Não possui conta? Cadastre-se aqui';
+      
+      document.getElementById('campoNome').classList.toggle('hidden', !modoCadastro);
+      document.getElementById('camposAdicionais').classList.toggle('hidden', !modoCadastro);
+    }
+
+    document.getElementById('formAuth').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value;
+      const senha = document.getElementById('authSenha').value;
+
+      if (modoCadastro) {
+        const nome = document.getElementById('authNome').value;
+        const cargo = document.getElementById('authCargo').value;
+        const salario = document.getElementById('authSalario').value;
+
+        const res = await fetch(`${API_URL}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nome, email, senha, cargo, salario })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('Conta criada com sucesso! Faça login.');
+          alternarModoAuth();
         } else {
-          exibirCadastro();
+          alert(data.error);
         }
-      } catch (err) {
-        exibirCadastro();
+      } else {
+        const res = await fetch(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, senha })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          localStorage.setItem('token_clt', data.token);
+          iniciarPainel();
+        } else {
+          alert(data.error);
+        }
       }
-    }
+    });
 
-    function exibirCadastro() {
-      document.getElementById('secao-cadastro').classList.remove('hidden');
-      document.getElementById('secao-principal').classList.add('hidden');
-    }
-
-    function exibirPainel() {
-      document.getElementById('secao-cadastro').classList.add('hidden');
+    function iniciarPainel() {
+      document.getElementById('secao-auth').classList.add('hidden');
       document.getElementById('secao-principal').classList.remove('hidden');
       carregarLancamentos();
     }
 
-    document.getElementById('formCadastro').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const dados = {
-        nome: document.getElementById('nome').value,
-        cargo: document.getElementById('cargo').value,
-        salario: document.getElementById('salario').value
-      };
-      const res = await fetch(`${API_URL}/usuario`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dados)
-      });
-      if (res.ok) exibirPainel();
-    });
+    function fazerLogout() {
+      localStorage.removeItem('token_clt');
+      document.getElementById('secao-auth').classList.remove('hidden');
+      document.getElementById('secao-principal').classList.add('hidden');
+    }
 
     async function carregarLancamentos() {
       const mesAno = document.getElementById('filtroMes').value;
       const url = mesAno ? `${API_URL}/lancamentos?mesAno=${mesAno}` : `${API_URL}/lancamentos`;
 
-      try {
-        const res = await fetch(url);
-        if (!res.ok) return;
-        dadosAtuais = await res.json();
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token()}` }
+      });
 
-        if (dadosAtuais.usuario) {
-          document.getElementById('resNome').innerText = dadosAtuais.usuario.nome;
-          document.getElementById('resCargo').innerText = dadosAtuais.usuario.cargo;
-          document.getElementById('resSalario').innerText = Number(dadosAtuais.usuario.salario).toFixed(2);
-          document.getElementById('resHoraBase').innerText = Number(dadosAtuais.resumo.valorHoraNormal).toFixed(2);
-          document.getElementById('resTotalHoras').innerText = Number(dadosAtuais.resumo.totalHoras || 0).toFixed(1);
-          document.getElementById('resTotalHE').innerText = Number(dadosAtuais.resumo.totalReceberHE || 0).toFixed(2);
-          document.getElementById('resDSR').innerText = Number(dadosAtuais.resumo.valorDSR || 0).toFixed(2);
-          document.getElementById('resTotalGeral').innerText = Number(dadosAtuais.resumo.totalGeral || 0).toFixed(2);
-        }
+      if (res.status === 401 || res.status === 403) {
+        fazerLogout();
+        return;
+      }
 
-        const tbody = document.getElementById('tabelaCorpo');
-        tbody.innerHTML = '';
+      dadosAtuais = await res.json();
 
-        if (dadosAtuais.lancamentos && dadosAtuais.lancamentos.length > 0) {
-          dadosAtuais.lancamentos.forEach(item => {
-            const itemJson = JSON.stringify(item).replace(/'/g, "&apos;");
-            tbody.innerHTML += `
-              <tr>
-                <td>${item.data}</td>
-                <td>${item.horaInicio} - ${item.horaFim}</td>
-                <td>${Number(item.totalHoras).toFixed(1)}h</td>
-                <td>${item.porcentagem}%</td>
-                <td>R$ ${Number(item.valorTotalItem).toFixed(2)}</td>
-                <td>${item.justificativa}</td>
-                <td>
-                  <button class="btn-edit" onclick='prepararEdicao(${itemJson})'>Editar</button>
-                  <button class="btn-delete" onclick="excluirLancamento(${item.id})">Excluir</button>
-                </td>
-              </tr>
-            `;
-          });
-        } else {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Nenhum lançamento encontrado.</td></tr>';
-        }
-      } catch (err) {
-        console.error(err);
+      if (dadosAtuais.usuario) {
+        document.getElementById('resNome').innerText = dadosAtuais.usuario.nome;
+        document.getElementById('resCargo').innerText = dadosAtuais.usuario.cargo || 'Não informado';
+        document.getElementById('resSalario').innerText = Number(dadosAtuais.usuario.salario).toFixed(2);
+        document.getElementById('resHoraBase').innerText = Number(dadosAtuais.resumo.valorHoraNormal).toFixed(2);
+        document.getElementById('resTotalHoras').innerText = Number(dadosAtuais.resumo.totalHoras || 0).toFixed(1);
+        document.getElementById('resTotalHE').innerText = Number(dadosAtuais.resumo.totalReceberHE || 0).toFixed(2);
+        document.getElementById('resDSR').innerText = Number(dadosAtuais.resumo.valorDSR || 0).toFixed(2);
+        document.getElementById('resTotalGeral').innerText = Number(dadosAtuais.resumo.totalGeral || 0).toFixed(2);
+      }
+
+      const tbody = document.getElementById('tabelaCorpo');
+      tbody.innerHTML = '';
+
+      if (dadosAtuais.lancamentos && dadosAtuais.lancamentos.length > 0) {
+        dadosAtuais.lancamentos.forEach(item => {
+          const itemJson = JSON.stringify(item).replace(/'/g, "&apos;");
+          tbody.innerHTML += `
+            <tr>
+              <td>${item.data}</td>
+              <td>${item.horaInicio} - ${item.horaFim}</td>
+              <td>${Number(item.totalHoras).toFixed(1)}h</td>
+              <td>${item.porcentagem}%</td>
+              <td>R$ ${Number(item.valorTotalItem).toFixed(2)}</td>
+              <td>${item.justificativa}</td>
+              <td>
+                <button class="btn-edit" onclick='prepararEdicao(${itemJson})'>Editar</button>
+                <button class="btn-delete" onclick="excluirLancamento(${item.id})">Excluir</button>
+              </td>
+            </tr>
+          `;
+        });
+      } else {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Nenhum lançamento registrado.</td></tr>';
       }
     }
 
@@ -224,7 +263,10 @@
 
       await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token()}`
+        },
         body: JSON.stringify(payload)
       });
 
@@ -254,7 +296,10 @@
 
     async function excluirLancamento(id) {
       if (confirm('Deseja excluir este registro?')) {
-        await fetch(`${API_URL}/lancamentos/${id}`, { method: 'DELETE' });
+        await fetch(`${API_URL}/lancamentos/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token()}` }
+        });
         carregarLancamentos();
       }
     }
@@ -277,7 +322,7 @@
       link.click();
     }
 
-    verificarUsuario();
+    if (token()) iniciarPainel();
   </script>
 </body>
 </html>
